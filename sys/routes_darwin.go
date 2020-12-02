@@ -1,4 +1,4 @@
-package routing
+package sys
 
 import (
 	"errors"
@@ -441,16 +441,22 @@ func (rd *routesDescription) apply() error {
 }
 
 func applyRoutes(args ApplyRoutesArgs) error {
-	if args.IfceNamePrimary == args.IfceNameVPN {
+	if args.Interfaces == nil {
+		log.Printf("using auto detect for interface names")
+		if err := autoDetectIfces(&args); err != nil {
+			return err
+		}
+	}
+	if args.Interfaces.Primary == args.Interfaces.VPN {
 		return errors.New("primary and vpn interface can't be same")
 	}
-	ifceInfoPrimary, err := getIfceInfo(args.IfceNamePrimary)
+	ifceInfoPrimary, err := getIfceInfo(args.Interfaces.Primary)
 	if err != nil {
 		return err
 	}
 	log.Printf("Primary Interface: %s\n", ifceInfoPrimary)
 
-	ifceInfoVPN, err := getIfceInfo(args.IfceNameVPN)
+	ifceInfoVPN, err := getIfceInfo(args.Interfaces.VPN)
 	if err != nil {
 		return err
 	}
