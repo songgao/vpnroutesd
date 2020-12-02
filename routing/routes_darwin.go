@@ -1,4 +1,4 @@
-package main
+package routing
 
 import (
 	"errors"
@@ -408,30 +408,24 @@ func (rd *routesDescription) apply() error {
 	return nil
 }
 
-type applyRoutesArgs struct {
-	ifceNamePrimary string
-	ifceNameVPN     string
-	vpnIPs          []net.IP
-}
-
-func applyRoutes(args applyRoutesArgs) error {
-	if args.ifceNamePrimary == args.ifceNameVPN {
+func applyRoutes(args ApplyRoutesArgs) error {
+	if args.IfceNamePrimary == args.IfceNameVPN {
 		return errors.New("primary and vpn interface can't be same")
 	}
-	ifceInfoPrimary, err := getIfceInfo(args.ifceNamePrimary)
+	ifceInfoPrimary, err := getIfceInfo(args.IfceNamePrimary)
 	if err != nil {
 		return err
 	}
 	log.Printf("Primary Interface: %s\n", ifceInfoPrimary)
 
-	ifceInfoVPN, err := getIfceInfo(args.ifceNameVPN)
+	ifceInfoVPN, err := getIfceInfo(args.IfceNameVPN)
 	if err != nil {
 		return err
 	}
 	log.Printf("VPN Interface: %s\n", ifceInfoVPN)
 
-	vpnIPs := make([]ipv4Addr, 0, len(args.vpnIPs))
-	for _, argIP := range args.vpnIPs {
+	vpnIPs := make([]ipv4Addr, 0, len(args.VPNIPs))
+	for _, argIP := range args.VPNIPs {
 		argIPv4 := argIP.To4()
 		if argIP == nil {
 			log.Printf("ignore non-IPv6 address: %s\n", argIP)
