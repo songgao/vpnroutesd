@@ -1,6 +1,9 @@
 package routing
 
-import "net"
+import (
+	"log"
+	"net"
+)
 
 // ApplyRoutesArgs includes args needed to call ApplyRoutes. These arges
 // specifies the desired final state that ApplyRoutes should achieve.
@@ -13,5 +16,7 @@ type ApplyRoutesArgs struct {
 // ApplyRoutes takes a declarative speficiation of what the routes should be
 // like, and interact with the system routing table to achieve that state.
 func ApplyRoutes(args ApplyRoutesArgs) error {
+	log.Println("+ ApplyRoutes")
+	defer log.Println("- ApplyRoutes")
 	return applyRoutes(args)
 }

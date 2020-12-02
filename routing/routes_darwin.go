@@ -18,6 +18,8 @@ const (
 
 type ipv4Addr [4]byte
 
+var ipv4Zeros = ipv4Addr{0, 0, 0, 0}
+
 var rtAddrNames = []string{
 	syscall.RTAX_AUTHOR:  "author",
 	syscall.RTAX_BRD:     "brd",
@@ -77,7 +79,7 @@ type ifceInfo struct {
 }
 
 func (ii ifceInfo) String() string {
-	return fmt.Sprintf("[%s] index=%d ip=%s\n", ii.name, ii.index, net.IP(ii.selfIP[:]))
+	return fmt.Sprintf("[%s] index=%d ip=%s", ii.name, ii.index, net.IP(ii.selfIP[:]))
 }
 
 func getIfceInfo(name string) (info ifceInfo, err error) {
@@ -245,26 +247,34 @@ func matchLink(linkIndex *int, addr route.Addr) bool {
 	if linkIndex == nil && (!ok || a == nil) {
 		return true
 	}
-	return a.Index == *linkIndex
+	return linkIndex != nil && a != nil && a.Index == *linkIndex
 }
 
 func (ri *routeItem) matches(routeMessage *route.RouteMessage) bool {
-	if routeMessage.Err != nil {
-		return false
-	}
+	// NOTE: It seems AF_ROUTE reports error even when it works. So ignore this
+	// check for now.
+	// if routeMessage.Err != nil {
+	// 	log.Printf("routeMessage not matched: error: %v", routeMessage.Err)
+	// 	return false
+	// }
 	if !matchIP(&ri.dst, routeMessage.Addrs[syscall.RTAX_DST]) {
+		log.Println("routeMessage not matched: dst")
 		return false
 	}
 	if !matchLink(ri.gatewayLink, routeMessage.Addrs[syscall.RTAX_GATEWAY]) {
+		log.Println("routeMessage not matched: gateway")
 		return false
 	}
 	if !matchIP(ri.gatewayIP, routeMessage.Addrs[syscall.RTAX_GATEWAY]) {
+		log.Println("routeMessage not matched: gateway")
 		return false
 	}
 	if !matchIP(ri.netmask, routeMessage.Addrs[syscall.RTAX_NETMASK]) {
+		log.Println("routeMessage not matched: netmask")
 		return false
 	}
 	if !matchIP(ri.ifa, routeMessage.Addrs[syscall.RTAX_IFA]) {
+		log.Println("routeMessage not matched: ifa")
 		return false
 	}
 	return true
@@ -321,9 +331,8 @@ func (rd *routesDescription) apply() error {
 			gatewayIP: &rd.iiVPN.selfIP,
 			ifa:       &rd.iiVPN.selfIP,
 		},
-		// TODO: fix route fetching so we don't mistakenly think this doesn't exist after we add it.
-		ipv4Addr{0, 0, 0, 0}: {
-			dst:         ipv4Addr{0, 0, 0, 0},
+		ipv4Zeros: {
+			dst:         ipv4Zeros,
 			netmask:     &ipv4Addr{0, 0, 0, 0},
 			gatewayLink: &rd.iiPrimary.index,
 			ifa:         &rd.iiPrimary.selfIP,
@@ -336,17 +345,35 @@ func (rd *routesDescription) apply() error {
 			ifa:         &rd.iiVPN.selfIP,
 		}
 	}
+	found := make(map[ipv4Addr]bool)
 
-	routeMsgs, err := fetchRoutes(rd.iiVPN.index)
+	// See if we can find the default route, and if so, mark it as found.
+	routeMsgsPrimary, err := fetchRoutes(rd.iiPrimary.index)
 	if err != nil {
 		return err
 	}
+	for _, rm := range routeMsgsPrimary {
+		addr, ok := rm.Addrs[syscall.RTAX_DST].(*route.Inet4Addr)
+		if !ok || addr.IP != ipv4Zeros {
+			continue
+		}
+		expected := expectedItems[ipv4Zeros]
+		if !expected.matches(rm) {
+			continue
+		}
+		log.Printf("skipping for existing routeItem: %s", expected)
+		found[ipv4Zeros] = true
+		break
+	}
 
+	// Go through all routes on the VPN interface and make changes as needed.
+	routeMsgsVPN, err := fetchRoutes(rd.iiVPN.index)
+	if err != nil {
+		return err
+	}
 	nextSeq := 1
 	var toWrite []*route.RouteMessage
-
-	found := make(map[ipv4Addr]bool)
-	for _, rm := range routeMsgs {
+	for _, rm := range routeMsgsVPN {
 		if rm.Flags&syscall.RTF_WASCLONED != 0 {
 			// ignore cloned routes
 			continue
@@ -375,7 +402,7 @@ func (rd *routesDescription) apply() error {
 
 	for dst, item := range expectedItems {
 		if found[dst] {
-			log.Printf("skipping ADD for existing routeItem: %s", item)
+			log.Printf("skipping for existing routeItem: %s", item)
 			continue
 		}
 		// Append a ADD message to toWrite.
@@ -390,6 +417,11 @@ func (rd *routesDescription) apply() error {
 	}
 	defer syscall.Close(fd)
 
+	if len(toWrite) == 0 {
+		log.Println("routes are correct; done!")
+		return nil
+	}
+
 	log.Printf("writing %d routeMessage items to AF_ROUTE", len(toWrite))
 	for _, msg := range toWrite {
 		// log.Printf("writing message: %s", pretty.Sprint(msg))
@@ -399,7 +431,7 @@ func (rd *routesDescription) apply() error {
 		}
 		_, err = syscall.Write(fd, b)
 		if err != nil {
-			log.Printf("error writing message seq %d", msg.Seq)
+			log.Printf("error writing message seq %d: %v", msg.Seq, err)
 			continue
 		}
 	}
