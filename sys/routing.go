@@ -1,8 +1,9 @@
 package sys
 
 import (
-	"log"
 	"net"
+
+	"go.uber.org/zap"
 )
 
 // InterfaceNames contains two interface names.
@@ -23,8 +24,8 @@ type ApplyRoutesArgs struct {
 
 // ApplyRoutes takes a declarative speficiation of what the routes should be
 // like, and interact with the system routing table to achieve that state.
-func ApplyRoutes(args ApplyRoutesArgs) error {
-	log.Println("+ ApplyRoutes")
-	defer log.Println("- ApplyRoutes")
-	return applyRoutes(args)
+func ApplyRoutes(logger *zap.Logger, args ApplyRoutesArgs) error {
+	logger.Sugar().Debugf("+ ApplyRoutes")
+	defer logger.Sugar().Debugf("- ApplyRoutes")
+	return applyRoutes(logger, args)
 }

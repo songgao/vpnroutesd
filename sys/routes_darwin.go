@@ -3,12 +3,12 @@ package sys
 import (
 	"errors"
 	"fmt"
-	"log"
 	"net"
 	"os"
 	"strings"
 	"syscall"
 
+	"go.uber.org/zap"
 	"golang.org/x/net/route"
 )
 
@@ -82,7 +82,7 @@ func (ii ifceInfo) String() string {
 	return fmt.Sprintf("[%s] index=%d ip=%s", ii.name, ii.index, net.IP(ii.selfIP[:]))
 }
 
-func getIfceInfo(name string) (info ifceInfo, err error) {
+func getIfceInfo(logger *zap.Logger, name string) (info ifceInfo, err error) {
 	b, err := route.FetchRIB(syscall.AF_INET, route.RIBTypeInterface, 0)
 	if err != nil {
 		return ifceInfo{}, err
@@ -99,7 +99,7 @@ loopLink:
 			for _, addr := range m.Addrs {
 				linkAddr, ok := addr.(*route.LinkAddr)
 				if !ok {
-					// log.Printf("ignoring message that is not LinkAddr: %#+v\n", addr)
+					// logger.Sugar().Debugf("ignoring message that is not LinkAddr: %#+v\n", addr)
 					continue
 				}
 				if linkAddr.Name == name {
@@ -108,7 +108,7 @@ loopLink:
 				}
 			}
 		default:
-			// log.Printf("ignoring message that is not InterfaceMessage")
+			// logger.Sugar().Debugf("ignoring message that is not InterfaceMessage")
 			continue
 		}
 	}
@@ -126,13 +126,13 @@ loopAddr:
 			}
 			ipAddr, ok := m.Addrs[syscall.RTAX_IFA].(*route.Inet4Addr)
 			if !ok {
-				// log.Printf("ignoring message that is not Inet4Addr: %#+v\n", addr)
+				// logger.Sugar().Debugf("ignoring message that is not Inet4Addr: %#+v\n", addr)
 				continue
 			}
 			info.selfIP = ipAddr.IP
 			break loopAddr
 		default:
-			// log.Printf("ignoring message that is not InterfaceMessage")
+			// logger.Sugar().Debugf("ignoring message that is not InterfaceMessage")
 			continue
 		}
 	}
@@ -142,7 +142,7 @@ loopAddr:
 	return info, nil
 }
 
-func fetchRoutes(ifceIndex int) (routes []*route.RouteMessage, err error) {
+func fetchRoutes(logger *zap.Logger, ifceIndex int) (routes []*route.RouteMessage, err error) {
 	b, err := route.FetchRIB(syscall.AF_INET, route.RIBTypeRoute, 0)
 	if err != nil {
 		return nil, err
@@ -154,11 +154,11 @@ func fetchRoutes(ifceIndex int) (routes []*route.RouteMessage, err error) {
 	for _, msg := range msgs {
 		rm, ok := msg.(*route.RouteMessage)
 		if !ok {
-			log.Printf("ignoring message that is not RouteMessage")
+			// logger.Sugar().Debugf("ignoring message that is not RouteMessage")
 			continue
 		}
 		if rm.Index != ifceIndex {
-			// log.Printf("other interface:\n%s", pretty.Sprint(rm))
+			// logger.Sugar().Debugf("other interface:\n%s", pretty.Sprint(rm))
 			continue
 		}
 		routes = append(routes, rm)
@@ -166,10 +166,10 @@ func fetchRoutes(ifceIndex int) (routes []*route.RouteMessage, err error) {
 	return routes, nil
 }
 
-func printRoutesForDebug(ifceIndex int, ignoreErrs bool) {
-	routeMsgs, err := fetchRoutes(ifceIndex)
+func printRoutesForDebug(logger *zap.Logger, ifceIndex int, ignoreErrs bool) {
+	routeMsgs, err := fetchRoutes(logger, ifceIndex)
 	if err != nil {
-		log.Fatalln(err)
+		logger.Sugar().Fatal(err)
 	}
 	for _, rm := range routeMsgs {
 		if ignoreErrs && rm.Err != nil {
@@ -250,31 +250,31 @@ func matchLink(linkIndex *int, addr route.Addr) bool {
 	return linkIndex != nil && a != nil && a.Index == *linkIndex
 }
 
-func (ri *routeItem) matches(routeMessage *route.RouteMessage) bool {
+func (ri *routeItem) matches(logger *zap.Logger, routeMessage *route.RouteMessage) bool {
 	// NOTE: It seems AF_ROUTE reports error even when it works. So ignore this
 	// check for now.
 	// if routeMessage.Err != nil {
-	// 	log.Printf("routeMessage not matched: error: %v", routeMessage.Err)
+	// 	logger.Sugar().Debugf("routeMessage not matched: error: %v", routeMessage.Err)
 	// 	return false
 	// }
 	if !matchIP(&ri.dst, routeMessage.Addrs[syscall.RTAX_DST]) {
-		log.Println("routeMessage not matched: dst")
+		logger.Sugar().Debugf("routeMessage not matched: dst")
 		return false
 	}
 	if !matchLink(ri.gatewayLink, routeMessage.Addrs[syscall.RTAX_GATEWAY]) {
-		log.Println("routeMessage not matched: gateway")
+		logger.Sugar().Debugf("routeMessage not matched: gateway")
 		return false
 	}
 	if !matchIP(ri.gatewayIP, routeMessage.Addrs[syscall.RTAX_GATEWAY]) {
-		log.Println("routeMessage not matched: gateway")
+		logger.Sugar().Debugf("routeMessage not matched: gateway")
 		return false
 	}
 	if !matchIP(ri.netmask, routeMessage.Addrs[syscall.RTAX_NETMASK]) {
-		log.Println("routeMessage not matched: netmask")
+		logger.Sugar().Debugf("routeMessage not matched: netmask")
 		return false
 	}
 	if !matchIP(ri.ifa, routeMessage.Addrs[syscall.RTAX_IFA]) {
-		log.Println("routeMessage not matched: ifa")
+		logger.Sugar().Debugf("routeMessage not matched: ifa")
 		return false
 	}
 	return true
@@ -324,7 +324,7 @@ type routesDescription struct {
 	vpnIPs    []ipv4Addr
 }
 
-func (rd *routesDescription) apply() error {
+func (rd *routesDescription) apply(logger *zap.Logger) error {
 	expectedItems := map[ipv4Addr]*routeItem{
 		rd.iiVPN.selfIP: {
 			dst:       rd.iiVPN.selfIP,
@@ -348,7 +348,7 @@ func (rd *routesDescription) apply() error {
 	found := make(map[ipv4Addr]bool)
 
 	// See if we can find the default route, and if so, mark it as found.
-	routeMsgsPrimary, err := fetchRoutes(rd.iiPrimary.index)
+	routeMsgsPrimary, err := fetchRoutes(logger, rd.iiPrimary.index)
 	if err != nil {
 		return err
 	}
@@ -358,16 +358,16 @@ func (rd *routesDescription) apply() error {
 			continue
 		}
 		expected := expectedItems[ipv4Zeros]
-		if !expected.matches(rm) {
+		if !expected.matches(logger, rm) {
 			continue
 		}
-		log.Printf("skipping for existing routeItem: %s", expected)
+		logger.Sugar().Debugf("skipping for existing routeItem: %s", expected)
 		found[ipv4Zeros] = true
 		break
 	}
 
 	// Go through all routes on the VPN interface and make changes as needed.
-	routeMsgsVPN, err := fetchRoutes(rd.iiVPN.index)
+	routeMsgsVPN, err := fetchRoutes(logger, rd.iiVPN.index)
 	if err != nil {
 		return err
 	}
@@ -385,14 +385,14 @@ func (rd *routesDescription) apply() error {
 		}
 
 		expected := expectedItems[dstAddr.IP]
-		if expected == nil || !expected.matches(rm) {
+		if expected == nil || !expected.matches(logger, rm) {
 			// Construct a DELETE message and append it to toWrite.
 			td := *rm
 			td.Seq = nextSeq
 			nextSeq++
 			td.Type = syscall.RTM_DELETE
 
-			log.Printf("queueing DELETE (seq %d) because routeMessage doesn't match routeItem: %s", td.Seq, expected)
+			logger.Sugar().Debugf("queueing DELETE (seq %d) because routeMessage doesn't match routeItem: %s", td.Seq, expected)
 			toWrite = append(toWrite, &td)
 		} else {
 			// Mark it as found so we don't re-add it.
@@ -402,11 +402,11 @@ func (rd *routesDescription) apply() error {
 
 	for dst, item := range expectedItems {
 		if found[dst] {
-			log.Printf("skipping for existing routeItem: %s", item)
+			logger.Sugar().Debugf("skipping for existing routeItem: %s", item)
 			continue
 		}
 		// Append a ADD message to toWrite.
-		log.Printf("queueing ADD (seq %d) for routeItem: %s", nextSeq, item)
+		logger.Sugar().Infof("queueing ADD (seq %d) for routeItem: %s", nextSeq, item)
 		toWrite = append(toWrite, item.toRouteMessage(nextSeq, rd.iiVPN.index, syscall.RTM_ADD))
 		nextSeq++
 	}
@@ -418,31 +418,31 @@ func (rd *routesDescription) apply() error {
 	defer syscall.Close(fd)
 
 	if len(toWrite) == 0 {
-		log.Println("routes are correct; done!")
+		logger.Sugar().Debugf("routes are correct; done!")
 		return nil
 	}
 
-	log.Printf("writing %d routeMessage items to AF_ROUTE", len(toWrite))
+	logger.Sugar().Infof("writing %d routeMessage items to AF_ROUTE", len(toWrite))
 	for _, msg := range toWrite {
-		// log.Printf("writing message: %s", pretty.Sprint(msg))
+		// logger.Sugar().Infof("writing message: %s", pretty.Sprint(msg))
 		b, err := msg.Marshal()
 		if err != nil {
 			return err
 		}
 		_, err = syscall.Write(fd, b)
 		if err != nil {
-			log.Printf("error writing message seq %d: %v", msg.Seq, err)
+			logger.Sugar().Warnf("error writing message seq %d: %v", msg.Seq, err)
 			continue
 		}
 	}
-	log.Printf("done writing %d routeMessage items to AF_ROUTE", len(toWrite))
+	logger.Sugar().Infof("done writing %d routeMessage items to AF_ROUTE", len(toWrite))
 
 	return nil
 }
 
-func applyRoutes(args ApplyRoutesArgs) error {
+func applyRoutes(logger *zap.Logger, args ApplyRoutesArgs) error {
 	if args.Interfaces == nil {
-		log.Printf("using auto detect for interface names")
+		logger.Sugar().Debugf("using auto detect for interface names")
 		if err := autoDetectIfces(&args); err != nil {
 			return err
 		}
@@ -450,23 +450,23 @@ func applyRoutes(args ApplyRoutesArgs) error {
 	if args.Interfaces.Primary == args.Interfaces.VPN {
 		return errors.New("primary and vpn interface can't be same")
 	}
-	ifceInfoPrimary, err := getIfceInfo(args.Interfaces.Primary)
+	ifceInfoPrimary, err := getIfceInfo(logger, args.Interfaces.Primary)
 	if err != nil {
 		return err
 	}
-	log.Printf("Primary Interface: %s\n", ifceInfoPrimary)
+	logger.Sugar().Debugf("Primary Interface: %s\n", ifceInfoPrimary)
 
-	ifceInfoVPN, err := getIfceInfo(args.Interfaces.VPN)
+	ifceInfoVPN, err := getIfceInfo(logger, args.Interfaces.VPN)
 	if err != nil {
 		return err
 	}
-	log.Printf("VPN Interface: %s\n", ifceInfoVPN)
+	logger.Sugar().Debugf("VPN Interface: %s\n", ifceInfoVPN)
 
 	vpnIPs := make([]ipv4Addr, 0, len(args.VPNIPs))
 	for _, argIP := range args.VPNIPs {
 		argIPv4 := argIP.To4()
 		if argIP == nil {
-			log.Printf("ignore non-IPv6 address: %s\n", argIP)
+			logger.Sugar().Infof("ignored non-IPv6 address: %s\n", argIP)
 			continue
 		}
 
@@ -480,5 +480,5 @@ func applyRoutes(args ApplyRoutesArgs) error {
 		iiPrimary: ifceInfoPrimary,
 		iiVPN:     ifceInfoVPN,
 		vpnIPs:    []ipv4Addr{{8, 8, 8, 8}, {8, 8, 4, 4}, {18, 214, 166, 21}},
-	}).apply()
+	}).apply(logger)
 }

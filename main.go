@@ -6,9 +6,19 @@ import (
 	"os"
 
 	"github.com/songgao/vpnroutesd/sys"
+	"go.uber.org/zap"
 )
 
 func main() {
+	var options []zap.Option
+	// options = append(options, zap.IncreaseLevel(zap.InfoLevel))
+	logger, err := zap.NewDevelopment(options...)
+	if err != nil {
+		panic(err)
+	}
+	defer logger.Sync()
+	logger.Info("Init")
+	defer logger.Info("Done")
 
 	args := sys.ApplyRoutesArgs{
 		VPNIPs: []net.IP{{8, 8, 8, 8}, {8, 8, 4, 4}, {18, 214, 166, 21}},
@@ -21,7 +31,7 @@ func main() {
 		}
 	}
 
-	if err := sys.ApplyRoutes(args); err != nil {
+	if err := sys.ApplyRoutes(logger, args); err != nil {
 		log.Fatalf("ApplyRoutes error: %v", err)
 	}
 }
