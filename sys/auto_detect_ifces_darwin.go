@@ -1,8 +1,11 @@
 package sys
 
 import (
-	"errors"
+	"bytes"
+	"fmt"
+	"io"
 	"os/exec"
+	"regexp"
 )
 
 /* Example output:
@@ -30,10 +33,93 @@ Network interfaces: utun6 en0
 
 */
 
+var reScutilStart = regexp.MustCompile("IPv4 network interface information")
+var reScutilEnd = regexp.MustCompile("IPv6 network interface information")
+var reScutilInterfaceStart = regexp.MustCompile(`([a-z0-9]+) : flags\s+: 0x(\S+)`)
+var reScutilInterfaceVPNServer = regexp.MustCompile(`\s+VPN server\s+: (\S+)`)
+
+// TODO: we can be smarter here and check the Reach flags if we want
+// var reScutilInterfaceAddress = regexp.MustCompile(`\s+address\s+: (\S+)`)
+// var reScutilInterfaceReach = regexp.MustCompile(`\s+reach\s+: 0x(\S+)`)
+
+type ifceForAutoDetect struct {
+	ifceName string
+	isVPN    bool
+}
+
+func findIfces(output []byte) (ifces []ifceForAutoDetect, err error) {
+	buf := bytes.NewBuffer(output)
+
+	// Find and consume the start line
+	for {
+		line, err := buf.ReadBytes('\n')
+		if err != nil {
+			return nil, err
+		}
+		if reScutilStart.Match(line) {
+			break
+		}
+	}
+
+	currentIfceName := ""
+	currentIsVPN := false
+	for {
+		line, err := buf.ReadBytes('\n')
+		switch err {
+		case nil:
+		case io.EOF:
+			break
+		default:
+			return nil, err
+		}
+
+		if matches := reScutilInterfaceStart.FindSubmatch(line); len(matches) > 0 {
+			if len(currentIfceName) > 0 {
+				ifces = append(ifces, ifceForAutoDetect{currentIfceName, currentIsVPN})
+				currentIfceName = ""
+				currentIsVPN = false
+			}
+			currentIfceName = string(matches[1])
+		} else if reScutilInterfaceVPNServer.Match(line) {
+			currentIsVPN = true
+		} else if reScutilEnd.Match(line) {
+			break
+		}
+	}
+	if len(currentIfceName) > 0 {
+		ifces = append(ifces, ifceForAutoDetect{currentIfceName, currentIsVPN})
+		currentIfceName = ""
+		currentIsVPN = false
+	}
+	return ifces, nil
+}
+
 func autoDetectIfces(args *ApplyRoutesArgs) error {
-	_, err := exec.Command("/usr/sbin/scutil", "--nwi").Output()
+	output, err := exec.Command("/usr/sbin/scutil", "--nwi").Output()
 	if err != nil {
 		return err
 	}
-	return errors.New("wip")
+	ifces, err := findIfces(output)
+	if err != nil {
+		return fmt.Errorf("failed to auto detect: %v", err)
+	}
+	if len(ifces) != 2 {
+		return fmt.Errorf("failed to auto detect: expected two interfaces but found: %#+v", ifces)
+	}
+	if ifces[0].isVPN == ifces[1].isVPN {
+		return fmt.Errorf("failed to auto detect: both interfaces have isVPN=%v", ifces[0].isVPN)
+	}
+
+	if ifces[0].isVPN {
+		args.Interfaces = &InterfaceNames{
+			VPN:     ifces[0].ifceName,
+			Primary: ifces[1].ifceName,
+		}
+	} else {
+		args.Interfaces = &InterfaceNames{
+			Primary: ifces[0].ifceName,
+			VPN:     ifces[1].ifceName,
+		}
+	}
+	return nil
 }
