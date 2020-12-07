@@ -83,7 +83,9 @@ func (r *resolver) purgeExpiredLocked(logger *zap.Logger) {
 		for ipArray, expiresAt := range rd {
 			if now.After(expiresAt) {
 				delete(rd, ipArray)
-				purged = append(purged, ipArray[:])
+				ipCopy := make(net.IP, 4)
+				copy(ipCopy, ipArray[:])
+				purged = append(purged, ipCopy)
 			}
 		}
 		if len(purged) > 0 {
@@ -109,7 +111,9 @@ func (r *resolver) get(logger *zap.Logger, dnsServer net.IP, domain string) []ne
 	}
 	ret := make([]net.IP, 0, len(dr))
 	for ipArray := range dr {
-		ret = append(ret, ipArray[:])
+		ipCopy := make(net.IP, 4)
+		copy(ipCopy, ipArray[:])
+		ret = append(ret, ipCopy)
 	}
 	return ret
 }

@@ -57,7 +57,7 @@ func run(logger *zap.Logger) (result runResult) {
 	} else {
 		result.dns = "UNCHANGED"
 	}
-	logger.Sugar().Debugf("IPs from DNS: %s", domainIPs)
+	logger.Sugar().Debugf("IPs from DNS: %s", dedupIPs(domainIPs))
 
 	args := sys.ApplyRoutesArgs{
 		VPNIPs: dedupIPs(cfg.VPNIPs, domainIPs),
