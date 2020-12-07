@@ -10,6 +10,7 @@ import (
 )
 
 type configToml struct {
+	DNSServer string
 	VPNRoutes struct {
 		Domains []string
 		IPs     []string
@@ -18,6 +19,7 @@ type configToml struct {
 
 // Config holds config fields for vpnroutesd.
 type Config struct {
+	DNSServer  net.IP
 	VPNDomains []string
 	VPNIPs     []net.IP
 }
@@ -44,6 +46,16 @@ func Load(logger *zap.Logger, p string) (cfg Config, changed bool, err error) {
 	var cfgToml configToml
 	if err = toml.Unmarshal(data, &cfgToml); err != nil {
 		return Config{}, false, fmt.Errorf("parsing config file error: %v", err)
+	}
+
+	if len(cfgToml.DNSServer) == 0 {
+		logger.Sugar().Debugf("DNSServer missing; using 8.8.8.8")
+		cfg.DNSServer = net.ParseIP("8.8.8.8")
+	} else {
+		cfg.DNSServer = net.ParseIP(cfgToml.DNSServer)
+		if cfg.DNSServer == nil {
+			return Config{}, false, fmt.Errorf("%s is not a valid IP address", cfgToml.DNSServer)
+		}
 	}
 
 	cfg.VPNDomains = cfgToml.VPNRoutes.Domains

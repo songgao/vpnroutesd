@@ -46,7 +46,7 @@ func run(logger *zap.Logger) (result runResult) {
 	}
 	logger.Sugar().Debugf("using config: %s", cfg)
 
-	domainIPs, dnsChanged, err := dns.GetIPs(logger, cfg.VPNDomains)
+	domainIPs, dnsChanged, err := dns.GetIPs(logger, cfg.DNSServer, cfg.VPNDomains)
 	if err != nil {
 		logger.Sugar().Errorf("dns.GetIPs error: %v", err)
 		result.dns = "ERR"
