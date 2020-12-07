@@ -14,7 +14,8 @@ the routing table. That's what `vpnroutesd` does.
 
 `vpnroutesd` is currently supported on macOS only. I'll try to find time to add
 Linux support. Maybe Windows too if I ever figure out how Windows routing
-works.
+works. Contributions are of course welcome but there's no test or CI right now
+so it might be a bit tough.
 
 ## Installation
 
@@ -35,13 +36,12 @@ DNSServer = "1.1.1.1"
 
 IPs = [
   # Be sure to include your DNS servers. Often with VPN connected, DNS lookups
-  # want to go # through the VPN interface. So if you have it routed through
-  # the primary
-  # lookups will fail.
+  # want to go through the VPN interface. So if you have it routed through
+  # the primary lookups will fail.
   "8.8.8.8",
   "8.8.4.4",
 
-  # add other IPs for accessing corporate internal resources
+  # Add other IPs for accessing corporate internal resources.
   "17.253.144.10",
 ]
 
@@ -54,8 +54,7 @@ Domains = [
 ```
 
 Store this file somewhere. There are three ways `vpnroutesd` can read a config
-file: the good old filesystem, a `https://` URL, or a Keybase Filesystem path.
-Some examples of how to run `vpnroutesd`:
+file: the good old filesystem, a `https://` URL, or a Keybase Filesystem path:
 
 ```bash
 sudo ./vpnroutesd -c ~/.vpnroutesd.toml
@@ -64,20 +63,25 @@ sudo ./vpnroutesd -c ~/.vpnroutesd.toml
 sudo ./vpnroutesd -c "https://internal.4seasontotallandscaping.com/.vpnroutesd.toml"
 ```
 ```bash
-# note the "@$USER" part -- this is because only current user can access KBFS
+# Note the "@$USER" part -- this is because only current user can access KBFS
 # paths. Since vpnroutesd is run as root, it needs to know which user to run
 # keybase commands as.
 sudo ./vpnroutesd -c "keybase@$USER://team/4seasontotallandscaping/vpn/.vpnroutesd.toml"
 ```
 
-You may have noticed we didn't tell `vpnroutesd` which network interface is the
-primary and which is the VPN interface. This is because it has built-in auto
-detection for network interfaces. If it fails, you'll see in the logs. In that
-case, you can manually specify inteface names. For example:
+You may have noticed we didn't tell `vpnroutesd` which network interface was
+the primary and which was the VPN interface. This is because it has built-in
+auto detection for network interfaces. If it fails, you'll know from the logs
+and can manually specify inteface names. For example:
 
 ```bash
 sudo ./vpnroutesd --primary-interface en0 --vpn-interface utun6 -c ~/.vpnroutesd.toml
 ```
+
+`vpnroutesd` is designed to be a long term running process. It executes tasks
+on an interval (default to 1min). On each iteration it reloads the config
+file, looks up DNS names, and apply routing changes if needed. As a result, any
+configuration changes will be dynamically picked up.
 
 ## TODOs
 
