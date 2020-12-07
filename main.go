@@ -3,9 +3,9 @@ package main
 import (
 	"fmt"
 	"log"
-	"net"
 	"os"
 
+	"github.com/songgao/vpnroutesd/config"
 	"github.com/songgao/vpnroutesd/sys"
 	"github.com/spf13/pflag"
 	"go.uber.org/zap"
@@ -50,8 +50,15 @@ func main() {
 	logger.Info("Init")
 	defer logger.Info("Done")
 
+	cfg, err := config.Load(logger, *fConfig)
+	if err != nil {
+		logger.Fatal(err.Error())
+	}
+
+	logger.Sugar().Debugf("using config: %s", cfg)
+
 	args := sys.ApplyRoutesArgs{
-		VPNIPs: []net.IP{{8, 8, 8, 8}, {8, 8, 4, 4}, {18, 214, 166, 21}},
+		VPNIPs: cfg.VPNIPs,
 	}
 
 	if len(*fPrimaryIfce) > 0 && len(*fVPNIfce) > 0 {

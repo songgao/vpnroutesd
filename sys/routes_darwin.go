@@ -479,6 +479,6 @@ func applyRoutes(logger *zap.Logger, args ApplyRoutesArgs) error {
 	return (&routesDescription{
 		iiPrimary: ifceInfoPrimary,
 		iiVPN:     ifceInfoVPN,
-		vpnIPs:    []ipv4Addr{{8, 8, 8, 8}, {8, 8, 4, 4}, {18, 214, 166, 21}},
+		vpnIPs:    vpnIPs,
 	}).apply(logger)
 }
