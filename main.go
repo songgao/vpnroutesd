@@ -10,6 +10,7 @@ import (
 )
 
 var fVerbose = pflag.BoolP("verbose", "v", false, "[optional] turn on debug logging")
+var fInterval = pflag.Uint64P("interval", "i", 60, "[optional] interval in seconds to do stuff. default is 60")
 var fConfig = pflag.StringP("config", "c", "", "[required] path to config file")
 var fPrimaryIfce = pflag.StringP("primary-interface", "i", "", "[optional] primary interface name (leave empty to use auto detection)")
 var fVPNIfce = pflag.StringP("vpn-interface", "j", "", "[optional] VPN interface name (leave empty to use auto detection)")
@@ -32,8 +33,6 @@ func parseFlagsOrBust() {
 	}
 }
 
-const runInterval = time.Second * 5
-
 func main() {
 	parseFlagsOrBust()
 
@@ -49,7 +48,7 @@ func main() {
 
 	logger.Info("Init")
 
-	ticker := time.NewTicker(runInterval)
+	ticker := time.NewTicker(time.Duration(*fInterval) * time.Second)
 	first := make(chan struct{}, 1)
 	first <- struct{}{}
 	for {
