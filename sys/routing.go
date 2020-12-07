@@ -24,7 +24,7 @@ type ApplyRoutesArgs struct {
 
 // ApplyRoutes takes a declarative speficiation of what the routes should be
 // like, and interact with the system routing table to achieve that state.
-func ApplyRoutes(logger *zap.Logger, args ApplyRoutesArgs) error {
+func ApplyRoutes(logger *zap.Logger, args ApplyRoutesArgs) (changed bool, err error) {
 	logger.Sugar().Debugf("+ ApplyRoutes")
 	defer logger.Sugar().Debugf("- ApplyRoutes")
 	return applyRoutes(logger, args)

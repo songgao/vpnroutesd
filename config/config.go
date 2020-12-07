@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"fmt"
 	"net"
 
@@ -21,6 +22,8 @@ type Config struct {
 	VPNIPs     []net.IP
 }
 
+var lastConfigData []byte
+
 // Load reads and parses a vpnroutesd config file from p, which can be one of
 // the following:
 //   1. filesystem path, e.g.
@@ -30,15 +33,17 @@ type Config struct {
 //   3. keybase filesystem path, e.g.
 //        keybase@alice://team/4seasontotallandscaping/vpn/.vpnroutesd.toml
 //        (alice is the system username, not keybase username)
-func Load(logger *zap.Logger, p string) (cfg Config, err error) {
+func Load(logger *zap.Logger, p string) (cfg Config, changed bool, err error) {
 	data, err := readConfig(logger, p)
 	if err != nil {
-		return Config{}, fmt.Errorf("reading config file error: %v", err)
+		return Config{}, false, fmt.Errorf("reading config file error: %v", err)
 	}
+	changed = !bytes.Equal(lastConfigData, data)
+	lastConfigData = data
 
 	var cfgToml configToml
 	if err = toml.Unmarshal(data, &cfgToml); err != nil {
-		return Config{}, fmt.Errorf("parsing config file error: %v", err)
+		return Config{}, false, fmt.Errorf("parsing config file error: %v", err)
 	}
 
 	cfg.VPNDomains = cfgToml.VPNRoutes.Domains
@@ -56,5 +61,5 @@ func Load(logger *zap.Logger, p string) (cfg Config, err error) {
 		cfg.VPNIPs = append(cfg.VPNIPs, ip)
 	}
 
-	return cfg, err
+	return cfg, changed, err
 }

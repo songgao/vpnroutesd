@@ -2,11 +2,9 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"os"
+	"time"
 
-	"github.com/songgao/vpnroutesd/config"
-	"github.com/songgao/vpnroutesd/sys"
 	"github.com/spf13/pflag"
 	"go.uber.org/zap"
 )
@@ -34,6 +32,8 @@ func parseFlagsOrBust() {
 	}
 }
 
+const runInterval = time.Second * 5
+
 func main() {
 	parseFlagsOrBust()
 
@@ -48,27 +48,16 @@ func main() {
 	defer logger.Sync()
 
 	logger.Info("Init")
-	defer logger.Info("Done")
 
-	cfg, err := config.Load(logger, *fConfig)
-	if err != nil {
-		logger.Fatal(err.Error())
-	}
-
-	logger.Sugar().Debugf("using config: %s", cfg)
-
-	args := sys.ApplyRoutesArgs{
-		VPNIPs: cfg.VPNIPs,
-	}
-
-	if len(*fPrimaryIfce) > 0 && len(*fVPNIfce) > 0 {
-		args.Interfaces = &sys.InterfaceNames{
-			Primary: *fPrimaryIfce,
-			VPN:     *fVPNIfce,
+	ticker := time.NewTicker(runInterval)
+	first := make(chan struct{}, 1)
+	first <- struct{}{}
+	for {
+		select {
+		case <-ticker.C:
+		case <-first:
 		}
-	}
-
-	if err := sys.ApplyRoutes(logger, args); err != nil {
-		log.Fatalf("ApplyRoutes error: %v", err)
+		results := run(logger)
+		logger.Sugar().Infof("Iteration: config [%s]; dns [%s]; routes [%s]", results.config, results.dns, results.routes)
 	}
 }

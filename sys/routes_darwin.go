@@ -324,7 +324,7 @@ type routesDescription struct {
 	vpnIPs    []ipv4Addr
 }
 
-func (rd *routesDescription) apply(logger *zap.Logger) error {
+func (rd *routesDescription) apply(logger *zap.Logger) (changed bool, err error) {
 	expectedItems := map[ipv4Addr]*routeItem{
 		rd.iiVPN.selfIP: {
 			dst:       rd.iiVPN.selfIP,
@@ -350,7 +350,7 @@ func (rd *routesDescription) apply(logger *zap.Logger) error {
 	// See if we can find the default route, and if so, mark it as found.
 	routeMsgsPrimary, err := fetchRoutes(logger, rd.iiPrimary.index)
 	if err != nil {
-		return err
+		return false, err
 	}
 	for _, rm := range routeMsgsPrimary {
 		addr, ok := rm.Addrs[syscall.RTAX_DST].(*route.Inet4Addr)
@@ -369,7 +369,7 @@ func (rd *routesDescription) apply(logger *zap.Logger) error {
 	// Go through all routes on the VPN interface and make changes as needed.
 	routeMsgsVPN, err := fetchRoutes(logger, rd.iiVPN.index)
 	if err != nil {
-		return err
+		return false, err
 	}
 	nextSeq := 1
 	var toWrite []*route.RouteMessage
@@ -392,7 +392,7 @@ func (rd *routesDescription) apply(logger *zap.Logger) error {
 			nextSeq++
 			td.Type = syscall.RTM_DELETE
 
-			logger.Sugar().Debugf("queueing DELETE (seq %d) because routeMessage doesn't match routeItem: %s", td.Seq, expected)
+			logger.Sugar().Infof("queueing DELETE (seq %d) because routeMessage doesn't match routeItem: %s", td.Seq, expected)
 			toWrite = append(toWrite, &td)
 		} else {
 			// Mark it as found so we don't re-add it.
@@ -413,13 +413,13 @@ func (rd *routesDescription) apply(logger *zap.Logger) error {
 
 	fd, err := syscall.Socket(syscall.AF_ROUTE, syscall.SOCK_RAW, 0)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer syscall.Close(fd)
 
 	if len(toWrite) == 0 {
 		logger.Sugar().Debugf("routes are correct; done!")
-		return nil
+		return false, nil
 	}
 
 	logger.Sugar().Infof("writing %d routeMessage items to AF_ROUTE", len(toWrite))
@@ -427,7 +427,7 @@ func (rd *routesDescription) apply(logger *zap.Logger) error {
 		// logger.Sugar().Infof("writing message: %s", pretty.Sprint(msg))
 		b, err := msg.Marshal()
 		if err != nil {
-			return err
+			return false, err
 		}
 		_, err = syscall.Write(fd, b)
 		if err != nil {
@@ -437,28 +437,28 @@ func (rd *routesDescription) apply(logger *zap.Logger) error {
 	}
 	logger.Sugar().Infof("done writing %d routeMessage items to AF_ROUTE", len(toWrite))
 
-	return nil
+	return true, nil
 }
 
-func applyRoutes(logger *zap.Logger, args ApplyRoutesArgs) error {
+func applyRoutes(logger *zap.Logger, args ApplyRoutesArgs) (changed bool, err error) {
 	if args.Interfaces == nil {
 		logger.Sugar().Debugf("using auto detect for interface names")
 		if err := autoDetectIfces(&args); err != nil {
-			return err
+			return false, err
 		}
 	}
 	if args.Interfaces.Primary == args.Interfaces.VPN {
-		return errors.New("primary and vpn interface can't be same")
+		return false, errors.New("primary and vpn interface can't be same")
 	}
 	ifceInfoPrimary, err := getIfceInfo(logger, args.Interfaces.Primary)
 	if err != nil {
-		return err
+		return false, err
 	}
 	logger.Sugar().Debugf("Primary Interface: %s\n", ifceInfoPrimary)
 
 	ifceInfoVPN, err := getIfceInfo(logger, args.Interfaces.VPN)
 	if err != nil {
-		return err
+		return false, err
 	}
 	logger.Sugar().Debugf("VPN Interface: %s\n", ifceInfoVPN)
 
