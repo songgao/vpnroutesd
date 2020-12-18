@@ -6,6 +6,8 @@ import (
 	"io"
 	"os/exec"
 	"regexp"
+
+	"go.uber.org/zap"
 )
 
 /* Example output:
@@ -37,6 +39,7 @@ var reScutilStart = regexp.MustCompile("IPv4 network interface information")
 var reScutilEnd = regexp.MustCompile("IPv6 network interface information")
 var reScutilInterfaceStart = regexp.MustCompile(`([a-z0-9]+) : flags\s+: 0x(\S+)`)
 var reScutilInterfaceVPNServer = regexp.MustCompile(`\s+VPN server\s+: (\S+)`)
+var reUTUN = regexp.MustCompile(`^utun\d+$`)
 
 // TODO: we can be smarter here and check the Reach flags if we want
 // var reScutilInterfaceAddress = regexp.MustCompile(`\s+address\s+: (\S+)`)
@@ -94,7 +97,7 @@ func findIfces(output []byte) (ifces []ifceForAutoDetect, err error) {
 	return ifces, nil
 }
 
-func autoDetectIfces(args *ApplyRoutesArgs) error {
+func autoDetectIfces(logger *zap.Logger, args *ApplyRoutesArgs) error {
 	output, err := exec.Command("/usr/sbin/scutil", "--nwi").Output()
 	if err != nil {
 		return err
@@ -106,8 +109,31 @@ func autoDetectIfces(args *ApplyRoutesArgs) error {
 	if len(ifces) != 2 {
 		return fmt.Errorf("failed to auto detect: expected two interfaces but found: %#+v", ifces)
 	}
-	if ifces[0].isVPN == ifces[1].isVPN {
-		return fmt.Errorf("failed to auto detect: both interfaces have isVPN=%v", ifces[0].isVPN)
+	if ifces[0].isVPN && ifces[1].isVPN {
+		return fmt.Errorf("failed to auto detect: both interfaces have isVPN=true")
+	}
+
+	if !ifces[0].isVPN && !ifces[1].isVPN {
+		logger.Sugar().Debugf("both interfaces have isVPN=false. Will try using just the interface names")
+		isUTUN0 := reUTUN.MatchString(ifces[0].ifceName)
+		isUTUN1 := reUTUN.MatchString(ifces[1].ifceName)
+		if isUTUN0 == isUTUN1 {
+			return fmt.Errorf("failed to auto detect: both interfaces have isVPN=false and both have isUTUN=%v", isUTUN0)
+		}
+
+		if isUTUN0 {
+			args.Interfaces = &InterfaceNames{
+				VPN:     ifces[0].ifceName,
+				Primary: ifces[1].ifceName,
+			}
+		} else {
+			args.Interfaces = &InterfaceNames{
+				Primary: ifces[0].ifceName,
+				VPN:     ifces[1].ifceName,
+			}
+		}
+
+		return nil
 	}
 
 	if ifces[0].isVPN {

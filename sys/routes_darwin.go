@@ -443,7 +443,7 @@ func (rd *routesDescription) apply(logger *zap.Logger) (changed bool, err error)
 func applyRoutes(logger *zap.Logger, args ApplyRoutesArgs) (changed bool, err error) {
 	if args.Interfaces == nil {
 		logger.Sugar().Debugf("using auto detect for interface names")
-		if err := autoDetectIfces(&args); err != nil {
+		if err := autoDetectIfces(logger, &args); err != nil {
 			return false, err
 		}
 	}
